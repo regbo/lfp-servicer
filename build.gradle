@@ -1,9 +1,18 @@
 plugins {
     id 'java'
+    id 'idea'
+    id 'maven'
+    id 'maven-publish'
+    id "com.jfrog.bintray" version "1.8.0"
 }
 
-group 'com.austinv11.servicer'
-version '1.0.0'
+ext {
+    ver = '1.0.0'
+    pkg = 'com.austinv11.servicer'
+}
+
+group pkg
+version ver
 
 sourceCompatibility = 1.8
 
@@ -13,4 +22,70 @@ repositories {
 
 dependencies {
     testCompile group: 'junit', name: 'junit', version: '4.12'
+}
+
+task sourcesJar(type: Jar, dependsOn: classes) {
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    classifier = 'javadoc'
+    from javadoc.destinationDir
+}
+
+javadoc {
+    failOnError false
+}
+
+artifacts {
+    archives sourcesJar
+    archives javadocJar
+}
+
+bintray {
+    user = System.getenv('BINTRAY_USER')
+    key = System.getenv('BINTRAY_KEY')
+    publications = ['MyPublication']
+}
+
+def pomConfig = {
+    licenses {
+        license {
+            name "Apache 2.0"
+            url "https://opensource.org/licenses/Apache-2.0"
+            distribution "repo"
+        }
+    }
+    developers {
+        developer {
+            id "austinv11"
+            name "Austin Varela"
+            email "austinv11@gmail.com"
+        }
+    }
+
+    scm {
+        url "https://github.com/austinv11/Servicer"
+    }
+}
+
+publishing {
+    publications {
+        MyPublication(MavenPublication) {
+            from components.java
+            artifact sourcesJar
+            artifact javadocJar
+            groupId pkg
+            artifactId 'Servicer'
+            version ver
+            pom.withXml {
+                def root = asNode()
+                root.appendNode('description', 'Easily wire Java services for loading via java.util.ServiceLoader')
+                root.appendNode('name', 'Servicer')
+                root.appendNode('url', 'https://github.com/austinv11/Servicer')
+                root.children().last() + pomConfig
+            }
+        }
+    }
 }
