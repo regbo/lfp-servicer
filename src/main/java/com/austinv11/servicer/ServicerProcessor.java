@@ -25,6 +25,7 @@ public class ServicerProcessor extends AbstractProcessor {
     private Elements elementUtils;
     private Filer filer;
     private Messager messager;
+    private Map<String, Set<String>> services = Collections.synchronizedMap(new HashMap<>());
 
     public ServicerProcessor() {} // Required
 
@@ -39,8 +40,10 @@ public class ServicerProcessor extends AbstractProcessor {
 
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
+        if (roundEnv.errorRaised())
+            return false;
+
         //Handle @WireService
-        Map<String, Set<String>> services = new HashMap<>();
         for (Element annotated : roundEnv.getElementsAnnotatedWith(WireService.class)) {
             if (annotated.getKind() == ElementKind.CLASS) {
     		    WireService[] serviceAnnotations = annotated.getAnnotationsByType(WireService.class);
@@ -59,6 +62,9 @@ public class ServicerProcessor extends AbstractProcessor {
         }
 
         messager.printMessage(Diagnostic.Kind.NOTE, "Found " + services.size() + " services!\n");
+
+        if (!roundEnv.processingOver())  // Only process at end
+            return true;
 
         services.forEach((k, v) -> {
             String serviceLocation = "META-INF/services" + "/" + k;
@@ -83,7 +89,7 @@ public class ServicerProcessor extends AbstractProcessor {
                 }
 
                 fo.delete();
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 messager.printMessage(Diagnostic.Kind.NOTE, serviceLocation + " does not yet exist!\n");
             }
 
@@ -98,8 +104,8 @@ public class ServicerProcessor extends AbstractProcessor {
                         w.append(impl).append("\n");
                     }
                 }
-            } catch (IOException e) {
-                messager.printMessage(Diagnostic.Kind.NOTE, e.getMessage());
+            } catch (Throwable e) {
+                messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process services.\n");
             }
         });
         return true;
