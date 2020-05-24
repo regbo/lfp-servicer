@@ -81,6 +81,8 @@ public class ServicerProcessor extends AbstractProcessor {
                             .filter(line -> !line.isEmpty())
                             .forEach(oldServices::add);
                 }
+
+                fo.delete();
             } catch (Exception e) {
                 messager.printMessage(Diagnostic.Kind.NOTE, serviceLocation + " does not yet exist!\n");
             }
@@ -97,8 +99,7 @@ public class ServicerProcessor extends AbstractProcessor {
                     }
                 }
             } catch (IOException e) {
-                messager.printMessage(Diagnostic.Kind.ERROR, e.getMessage());
-                e.printStackTrace();
+                messager.printMessage(Diagnostic.Kind.NOTE, e.getMessage());
             }
         });
         return true;
