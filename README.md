@@ -13,7 +13,7 @@ Add this project to your pom.xml as so:
 <dependency>
     <groupId>com.austinv11.servicer</groupId>
     <artifactId>Servicer</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <optional>true</optional>
 </dependency>
 ```
@@ -21,8 +21,8 @@ Add this project to your pom.xml as so:
 Or if you use gradle, add this project to your build.gradle as so:
 ```groovy
 dependencies {
-    compileOnly 'com.austinv11.servicer:Servicer:1.0.0'
-    annotationProcessor 'com.austinv11.servicer:Servicer:1.0.0'
+    compileOnly 'com.austinv11.servicer:Servicer:1.0.1'
+    annotationProcessor 'com.austinv11.servicer:Servicer:1.0.1'
 }
 ```
 
