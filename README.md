@@ -7,13 +7,15 @@ A simple annotation processor for wiring Java services. Simply enable annotation
 This project has the same goal as [Google's AutoService](https://github.com/google/auto/tree/master/service) but this is much more 
 lightweight (only includes 3 classes and has no external dependencies).
 
+It also supports gradle's incremental compilation feature.
+
 ## Usage
 Add this project to your pom.xml as so:
 ```xml
 <dependency>
     <groupId>com.austinv11.servicer</groupId>
     <artifactId>Servicer</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.3</version>
     <optional>true</optional>
 </dependency>
 ```
@@ -21,8 +23,8 @@ Add this project to your pom.xml as so:
 Or if you use gradle, add this project to your build.gradle as so:
 ```groovy
 dependencies {
-    compileOnly 'com.austinv11.servicer:Servicer:1.0.2'
-    annotationProcessor 'com.austinv11.servicer:Servicer:1.0.2'
+    compileOnly 'com.austinv11.servicer:Servicer:1.0.3'
+    annotationProcessor 'com.austinv11.servicer:Servicer:1.0.3'
 }
 ```
 

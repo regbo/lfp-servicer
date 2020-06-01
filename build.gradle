@@ -6,7 +6,7 @@ plugins {
 }
 
 ext {
-    ver = '1.0.2'
+    ver = '1.0.3'
     pkg = 'com.austinv11.servicer'
 }
 
