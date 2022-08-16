@@ -2,10 +2,10 @@ package com.austinv11.servicer;
 
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
+import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.TypeElement;
-import javax.lang.model.type.MirroredTypeException;
 import javax.lang.model.type.MirroredTypesException;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
@@ -18,6 +18,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
@@ -45,12 +46,9 @@ public class ServicerProcessor extends AbstractProcessor {
     @Override
     public synchronized boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
         if (roundEnv.errorRaised()) return false;
+        List<? extends TypeElement> additionalAnnotations = getAdditionalAnnotations(roundEnv).collect(Collectors.toList());
         Stream<? extends Element> annotatedStream = roundEnv.getElementsAnnotatedWith(WireService.class).stream();
-        for (TypeElement annotation : annotations)
-            if (annotation.getAnnotation(WireService.class) != null) {
-                for (Element annotated : roundEnv.getElementsAnnotatedWith(annotation))
-                    annotatedStream = Stream.concat(annotatedStream, Stream.of(annotated));
-            }
+        annotatedStream = Stream.concat(annotatedStream, additionalAnnotations.stream().flatMap(annotation -> roundEnv.getElementsAnnotatedWith(annotation).stream()));
         annotatedStream = annotatedStream.distinct();
         //Handle @WireService
         Iterator<? extends Element> annotatedIter = annotatedStream.iterator();
@@ -121,9 +119,28 @@ public class ServicerProcessor extends AbstractProcessor {
         return true;
     }
 
+
     @Override
     public SourceVersion getSupportedSourceVersion() {
         return super.getSupportedSourceVersion();
+    }
+
+    private Stream<? extends TypeElement> getAdditionalAnnotations(RoundEnvironment roundEnv) {
+        Set<TypeMirror> visitedTypeMirrors = new HashSet<>();
+        return roundEnv.getElementsAnnotatedWith(WireService.class).stream().flatMap(annotated -> {
+            return getAdditionalAnnotations(roundEnv, annotated, visitedTypeMirrors);
+        });
+    }
+
+    private Stream<? extends TypeElement> getAdditionalAnnotations(RoundEnvironment roundEnv, Element element, Set<TypeMirror> visitedTypeMirrors) {
+        if (element.getKind() != ElementKind.ANNOTATION_TYPE || !(element instanceof TypeElement))
+            return Stream.empty();
+        TypeElement typeElement = (TypeElement) element;
+        if (!visitedTypeMirrors.add(typeElement.asType()))
+            return Stream.empty();
+        Stream<? extends TypeElement> elStream = roundEnv.getElementsAnnotatedWith(typeElement).stream().flatMap(annotated -> getAdditionalAnnotations(roundEnv, annotated, visitedTypeMirrors));
+        elStream = Stream.concat(Stream.of(typeElement), elStream);
+        return elStream;
     }
 
     private static class Services {
