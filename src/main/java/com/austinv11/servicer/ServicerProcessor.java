@@ -50,7 +50,7 @@ public class ServicerProcessor extends AbstractProcessor {
     private Elements elements;
     private Filer filer;
     private Messager messager;
-    private final Map<String, Services> services = new HashMap<>();
+    private final Map<String, Services> serviceMapping = new HashMap<>();
 
     public ServicerProcessor() {
     } // Required
@@ -93,17 +93,41 @@ public class ServicerProcessor extends AbstractProcessor {
                 if (serviceNames.isEmpty() || !matchingAdditionalAnnotations.isEmpty())
                     serviceNames.add(((TypeElement) annotated).asType().toString());
                 for (String serviceName : serviceNames)
-                    services.computeIfAbsent(serviceName, nil -> new Services()).add(annotated);
+                    serviceMapping.computeIfAbsent(serviceName, nil -> new Services()).add(annotated);
             }
         }
 
-        messager.printMessage(Diagnostic.Kind.NOTE, "Found " + services.size() + " services!\n");
+        messager.printMessage(Diagnostic.Kind.NOTE, "Found " + serviceMapping.size() + " services!\n");
 
         if (!roundEnv.processingOver())  // Only process at end
             return true;
+        for (String serviceName : new ArrayList<>(serviceMapping.keySet())) {
+            TypeElement serviceTypeElement = elements.getTypeElement(serviceName);
+            for (TypeElement implementationTypeElement : serviceMapping.get(serviceName).getElements(elements)) {
+                Map.Entry<String, String> classNameEntry = getServicerRegistrationClassNameEntry(serviceTypeElement, implementationTypeElement);
+                serviceMapping.computeIfAbsent(ServicerRegistration.class.getName(), nil -> new Services()).add(classNameEntry.getKey() + "." + classNameEntry.getValue());
+            }
+        }
+        serviceMapping.entrySet().stream().sorted(Comparator.comparing(ent -> ServicerRegistration.class.equals(ent.getKey()) ? 1 : 0)).forEach(ent -> {
+            String serviceName = ent.getKey();
+            Services services = ent.getValue();
 
-        services.forEach((k, s) -> {
-            String serviceLocation = "META-INF/services" + "/" + k;
+            if (!ServicerRegistration.class.equals(serviceName))
+                try {
+                    TypeElement serviceTypeElement = elements.getTypeElement(serviceName);
+                    for (TypeElement implementationTypeElement : services.getElements(elements))
+                        try {
+                            writeServicerRegistration(filer, serviceTypeElement, implementationTypeElement);
+                        } catch (Throwable e) {
+                            String message = String.format("Error caught attempting to process service registration. serviceType:%s implementationType:%s", serviceTypeElement.asType(), implementationTypeElement.asType());
+                            messager.printMessage(Diagnostic.Kind.NOTE, message + "\n");
+                        }
+                } catch (Throwable e) {
+                    messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process service registrations.\n");
+                }
+
+
+            String serviceLocation = "META-INF/services" + "/" + serviceName;
 
             List<String> oldServices = new ArrayList<>();
 
@@ -126,31 +150,20 @@ public class ServicerProcessor extends AbstractProcessor {
             }
 
             try {
-                FileObject fo = filer.createResource(StandardLocation.CLASS_OUTPUT, "", serviceLocation, s.getElements(elements));
+                FileObject fo = filer.createResource(StandardLocation.CLASS_OUTPUT, "", serviceLocation, services.getElements(elements));
                 try (OutputStreamWriter w = new OutputStreamWriter(fo.openOutputStream())) {
                     for (String oldService : oldServices) {
                         w.append(oldService).append("\n");
                     }
-                    for (String impl : s.getImpls()) {
-                        messager.printMessage(Diagnostic.Kind.NOTE, "Setting up " + impl + " for use as a " + k + " implementation!\n");
+                    for (String impl : services.getImpls()) {
+                        messager.printMessage(Diagnostic.Kind.NOTE, "Setting up " + impl + " for use as a " + serviceName + " implementation!\n");
                         w.append(impl).append("\n");
                     }
                 }
             } catch (Throwable e) {
                 messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process services.\n");
             }
-            try {
-                TypeElement serviceTypeElement = elements.getTypeElement(k);
-                for (TypeElement implementationTypeElement : s.getElements(elements))
-                    try {
-                        writeServicerRegistration(filer, serviceTypeElement, implementationTypeElement);
-                    } catch (Throwable e) {
-                        String message = String.format("Error caught attempting to process service registration. serviceType:%s implementationType:%s", serviceTypeElement.asType(), implementationTypeElement.asType());
-                        messager.printMessage(Diagnostic.Kind.NOTE, message + "\n");
-                    }
-            } catch (Throwable e) {
-                messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process service registrations.\n");
-            }
+
         });
         return true;
     }
@@ -182,8 +195,9 @@ public class ServicerProcessor extends AbstractProcessor {
 
     private void writeServicerRegistration(Filer filer, TypeElement serviceTypeElement, TypeElement implementationTypeElement) throws IOException {
         String code = CODE_TEMPLATE;
-        String implementationTypePackageName = getPackageName(implementationTypeElement);
-        String simpleName = serviceTypeElement.getSimpleName().toString() + ServicerRegistration.class.getSimpleName();
+        Map.Entry<String, String> classNameEntry = getServicerRegistrationClassNameEntry(serviceTypeElement, implementationTypeElement);
+        String implementationTypePackageName = classNameEntry.getKey();
+        String simpleName = classNameEntry.getValue();
         {
             Map<String, String> tokenMap = new HashMap<>();
             tokenMap.put("IMPLEMENTATION_TYPE_PACKAGE_NAME", implementationTypePackageName);
@@ -208,7 +222,13 @@ public class ServicerProcessor extends AbstractProcessor {
         }
     }
 
-    private String getPackageName(Element element) {
+    private static Map.Entry<String, String> getServicerRegistrationClassNameEntry(TypeElement serviceTypeElement, TypeElement implementationTypeElement) {
+        String implementationTypePackageName = getPackageName(implementationTypeElement);
+        String simpleName = serviceTypeElement.getSimpleName().toString() + ServicerRegistration.class.getSimpleName();
+        return new AbstractMap.SimpleEntry<>(implementationTypePackageName, simpleName);
+    }
+
+    private static String getPackageName(Element element) {
         Element currentElement = element;
         while (currentElement != null) {
             if (currentElement.getKind() == ElementKind.PACKAGE && currentElement instanceof PackageElement)
@@ -217,6 +237,7 @@ public class ServicerProcessor extends AbstractProcessor {
         }
         return null;
     }
+
 
     private static int getJavaVersion() {
         try {
@@ -229,6 +250,9 @@ public class ServicerProcessor extends AbstractProcessor {
     private static class Services {
         private final Set<String> impls = new HashSet<>();
 
+        void add(String annotated) {
+            impls.add(annotated);
+        }
 
         void add(Element annotated) {
             impls.add(annotated.asType().toString());
