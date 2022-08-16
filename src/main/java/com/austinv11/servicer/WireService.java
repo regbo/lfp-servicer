@@ -17,7 +17,7 @@ import java.lang.annotation.*;
 @Documented
 public @interface WireService {
 
-    Class<?> value();
+    Class<?>[] values() default {};
 }
 
 @Target(ElementType.TYPE)

@@ -11,14 +11,15 @@ import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
 import javax.tools.FileObject;
 import javax.tools.StandardLocation;
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.stream.Stream;
 
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
-@SupportedAnnotationTypes({
-        "com.austinv11.servicer.WireService"
-})
+@SupportedAnnotationTypes({"com.austinv11.servicer.WireService"})
 public class ServicerProcessor extends AbstractProcessor {
 
     private Types typeUtils;
@@ -41,22 +42,33 @@ public class ServicerProcessor extends AbstractProcessor {
 
     @Override
     public synchronized boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
-        if (roundEnv.errorRaised())
-            return false;
-
+        if (roundEnv.errorRaised()) return false;
+        Stream<? extends Element> annotatedStream = roundEnv.getElementsAnnotatedWith(WireService.class).stream();
+        for (TypeElement annotation : annotations)
+            if (annotation.getAnnotation(WireService.class) != null) {
+                for (Element annotated : roundEnv.getElementsAnnotatedWith(annotation))
+                    annotatedStream = Stream.concat(annotatedStream, Stream.of(annotated));
+            }
+        annotatedStream = annotatedStream.distinct();
         //Handle @WireService
-        for (Element annotated : roundEnv.getElementsAnnotatedWith(WireService.class)) {
+        Iterator<? extends Element> annotatedIter = annotatedStream.iterator();
+        while (annotatedIter.hasNext()) {
+            Element annotated = annotatedIter.next();
             if (annotated.getKind() == ElementKind.CLASS) {
                 WireService[] serviceAnnotations = annotated.getAnnotationsByType(WireService.class);
-                for (WireService service : serviceAnnotations) {
-                    String serviceName;
-                    try {
-                        serviceName = service.value().getCanonicalName();
-                    } catch (MirroredTypeException e) {
-                        serviceName = e.getTypeMirror().toString(); //Yeah, apparently this is the solution you're supposed to use
-                    }
+                String[] serviceNames = Stream.of(serviceAnnotations).flatMap(service -> {
+                    return Stream.of(service.values()).map(value -> {
+                        try {
+                            return value.getCanonicalName();
+                        } catch (MirroredTypeException e) {
+                            return e.getTypeMirror().toString(); //Yeah, apparently this is the solution you're supposed to use
+                        }
+                    });
+                }).distinct().toArray(String[]::new);
+                if (serviceNames.length == 0 && annotated instanceof TypeElement)
+                    serviceNames = new String[]{((TypeElement) annotated).asType().toString()};
+                for (String serviceName : serviceNames)
                     services.computeIfAbsent(serviceName, name -> new Services()).add(annotated);
-                }
             }
         }
 
@@ -74,17 +86,13 @@ public class ServicerProcessor extends AbstractProcessor {
                 // If the file has already been created, we must first call getResource to allow for overwriting
                 FileObject fo = filer.getResource(StandardLocation.CLASS_OUTPUT, "", serviceLocation);
 
-                try (BufferedReader reader = new BufferedReader(new InputStreamReader(fo.openInputStream(),
-                        StandardCharsets.UTF_8))) { // Can't check if it exists, must catch an exception from here
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(fo.openInputStream(), StandardCharsets.UTF_8))) { // Can't check if it exists, must catch an exception from here
 
-                    reader.lines()
-                            .map(line -> {
-                                int comment = line.indexOf("#");
+                    reader.lines().map(line -> {
+                        int comment = line.indexOf("#");
 
-                                return (comment >= 0 ? line.substring(0, comment) : line).trim();
-                            })
-                            .filter(line -> !line.isEmpty())
-                            .forEach(oldServices::add);
+                        return (comment >= 0 ? line.substring(0, comment) : line).trim();
+                    }).filter(line -> !line.isEmpty()).forEach(oldServices::add);
                 }
 
                 fo.delete();
