@@ -108,11 +108,11 @@ public class ServicerProcessor extends AbstractProcessor {
                 serviceMapping.computeIfAbsent(ServicerRegistration.class.getName(), nil -> new Services()).add(classNameEntry.getKey() + "." + classNameEntry.getValue());
             }
         }
-        serviceMapping.entrySet().stream().sorted(Comparator.comparing(ent -> ServicerRegistration.class.equals(ent.getKey()) ? 1 : 0)).forEach(ent -> {
+        serviceMapping.entrySet().stream().sorted(Comparator.comparing(ent -> ServicerRegistration.class.getName().equals(ent.getKey()) ? 1 : 0)).forEach(ent -> {
             String serviceName = ent.getKey();
             Services services = ent.getValue();
 
-            if (!ServicerRegistration.class.equals(serviceName))
+            if (!ServicerRegistration.class.getName().equals(serviceName))
                 try {
                     TypeElement serviceTypeElement = elements.getTypeElement(serviceName);
                     for (TypeElement implementationTypeElement : services.getElements(elements))
