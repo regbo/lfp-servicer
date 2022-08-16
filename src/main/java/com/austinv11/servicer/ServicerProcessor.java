@@ -57,7 +57,7 @@ public class ServicerProcessor extends AbstractProcessor {
             if (annotated.getKind() == ElementKind.CLASS) {
                 WireService[] serviceAnnotations = annotated.getAnnotationsByType(WireService.class);
                 String[] serviceNames = Stream.of(serviceAnnotations).flatMap(service -> {
-                    return Stream.of(service.values()).map(value -> {
+                    return Stream.of(service.value()).map(value -> {
                         try {
                             return value.getCanonicalName();
                         } catch (MirroredTypeException e) {
