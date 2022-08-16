@@ -102,9 +102,8 @@ public class ServicerProcessor extends AbstractProcessor {
         if (!roundEnv.processingOver())  // Only process at end
             return true;
         for (String serviceName : new ArrayList<>(serviceMapping.keySet())) {
-            TypeElement serviceTypeElement = elements.getTypeElement(serviceName);
             for (TypeElement implementationTypeElement : serviceMapping.get(serviceName).getElements(elements)) {
-                Map.Entry<String, String> classNameEntry = getServicerRegistrationClassNameEntry(serviceTypeElement, implementationTypeElement);
+                Map.Entry<String, String> classNameEntry = getServicerRegistrationClassNameEntry(implementationTypeElement);
                 serviceMapping.computeIfAbsent(ServicerRegistration.class.getName(), nil -> new Services()).add(classNameEntry.getKey() + "." + classNameEntry.getValue());
             }
         }
@@ -195,7 +194,7 @@ public class ServicerProcessor extends AbstractProcessor {
 
     private void writeServicerRegistration(Filer filer, TypeElement serviceTypeElement, TypeElement implementationTypeElement) throws IOException {
         String code = CODE_TEMPLATE;
-        Map.Entry<String, String> classNameEntry = getServicerRegistrationClassNameEntry(serviceTypeElement, implementationTypeElement);
+        Map.Entry<String, String> classNameEntry = getServicerRegistrationClassNameEntry(implementationTypeElement);
         String implementationTypePackageName = classNameEntry.getKey();
         String simpleName = classNameEntry.getValue();
         {
@@ -222,9 +221,9 @@ public class ServicerProcessor extends AbstractProcessor {
         }
     }
 
-    private static Map.Entry<String, String> getServicerRegistrationClassNameEntry(TypeElement serviceTypeElement, TypeElement implementationTypeElement) {
+    private static Map.Entry<String, String> getServicerRegistrationClassNameEntry(TypeElement implementationTypeElement) {
         String implementationTypePackageName = getPackageName(implementationTypeElement);
-        String simpleName = serviceTypeElement.getSimpleName().toString() + ServicerRegistration.class.getSimpleName();
+        String simpleName = implementationTypeElement.getSimpleName().toString() + ServicerRegistration.class.getSimpleName();
         return new AbstractMap.SimpleEntry<>(implementationTypePackageName, simpleName);
     }
 
