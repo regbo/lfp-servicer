@@ -66,13 +66,16 @@ public class ServicerProcessor extends AbstractProcessor {
                         return typeMirrors.stream().map(Object::toString);
                     }
                 }).collect(Collectors.toSet());
-                boolean addAnnotated = serviceNames.isEmpty() || annotated.getAnnotationMirrors().stream().map(AnnotationMirror::getAnnotationType).anyMatch(annotationType -> {
-                    return additionalAnnotations.stream().map(TypeElement::asType).anyMatch(annotationType::equals);
-                });
-                if (addAnnotated)
+                List<TypeMirror> matchingAdditionalAnnotations = additionalAnnotations.stream().map(TypeElement::asType).filter(typeMirror -> {
+                    return annotated.getAnnotationMirrors().stream().map(AnnotationMirror::getAnnotationType).anyMatch(typeMirror::equals);
+                }).collect(Collectors.toList());
+                if (serviceNames.isEmpty() || !matchingAdditionalAnnotations.isEmpty())
                     serviceNames.add(((TypeElement) annotated).asType().toString());
                 for (String serviceName : serviceNames)
-                    services.computeIfAbsent(serviceName, name -> new Services()).add(annotated);
+                    services.computeIfAbsent(serviceName, nil -> new Services()).add(annotated);
+                services.computeIfAbsent(WireService.class.getName(), nil -> new Services()).add(annotated);
+                for (TypeMirror matchingAdditionalAnnotation : matchingAdditionalAnnotations)
+                    services.computeIfAbsent(matchingAdditionalAnnotation.toString(), nil -> new Services()).add(annotated);
             }
         }
 
