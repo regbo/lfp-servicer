@@ -224,7 +224,7 @@ public class ServicerProcessor extends AbstractProcessor {
 
     private static Map.Entry<String, String> getServicerRegistrationClassNameEntry(TypeElement serviceTypeElement, TypeElement implementationTypeElement) {
         String implementationTypePackageName = getPackageName(implementationTypeElement);
-        String simpleName = Stream.<Object>of(serviceTypeElement.getSimpleName(), implementationTypeElement.getSimpleName(), ServicerRegistration.class.getSimpleName()).map(Objects::toString).collect(Collectors.joining("."));
+        String simpleName = Stream.<Object>of(serviceTypeElement.getSimpleName(), implementationTypeElement.getSimpleName(), ServicerRegistration.class.getSimpleName()).map(Objects::toString).collect(Collectors.joining());
         return new AbstractMap.SimpleEntry<>(implementationTypePackageName, simpleName);
     }
 
