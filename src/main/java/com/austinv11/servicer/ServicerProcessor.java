@@ -6,6 +6,8 @@ import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.MirroredTypeException;
+import javax.lang.model.type.MirroredTypesException;
+import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
@@ -57,13 +59,14 @@ public class ServicerProcessor extends AbstractProcessor {
             if (annotated.getKind() == ElementKind.CLASS) {
                 WireService[] serviceAnnotations = annotated.getAnnotationsByType(WireService.class);
                 String[] serviceNames = Stream.of(serviceAnnotations).flatMap(service -> {
-                    return Stream.of(service.value()).map(value -> {
-                        try {
-                            return value.getCanonicalName();
-                        } catch (MirroredTypeException e) {
-                            return e.getTypeMirror().toString(); //Yeah, apparently this is the solution you're supposed to use
-                        }
-                    });
+                    try {
+                        return Stream.of(service.value()).map(Class::getCanonicalName);
+                    } catch (MirroredTypesException e) {
+                        List<? extends TypeMirror> typeMirrors = e.getTypeMirrors();
+                        if (typeMirrors == null)
+                            return Stream.empty();
+                        return typeMirrors.stream().map(Object::toString);
+                    }
                 }).distinct().toArray(String[]::new);
                 if (serviceNames.length == 0 && annotated instanceof TypeElement)
                     serviceNames = new String[]{((TypeElement) annotated).asType().toString()};
