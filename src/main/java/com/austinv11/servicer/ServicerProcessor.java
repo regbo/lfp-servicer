@@ -93,7 +93,7 @@ public class ServicerProcessor extends AbstractProcessor {
         typeUtils = processingEnv.getTypeUtils();
         elements = processingEnv.getElementUtils();
         filer = processingEnv.getFiler();
-        messager = messager;
+        messager = processingEnv.getMessager();
     }
 
     @Override
