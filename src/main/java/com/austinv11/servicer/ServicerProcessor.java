@@ -56,7 +56,7 @@ public class ServicerProcessor extends AbstractProcessor {
             Element annotated = annotatedIter.next();
             if (annotated.getKind() == ElementKind.CLASS) {
                 WireService[] serviceAnnotations = annotated.getAnnotationsByType(WireService.class);
-                String[] serviceNames = Stream.of(serviceAnnotations).flatMap(service -> {
+                Set<String> serviceNames = Stream.of(serviceAnnotations).flatMap(service -> {
                     try {
                         return Stream.of(service.value()).map(Class::getCanonicalName);
                     } catch (MirroredTypesException e) {
@@ -65,9 +65,12 @@ public class ServicerProcessor extends AbstractProcessor {
                             return Stream.empty();
                         return typeMirrors.stream().map(Object::toString);
                     }
-                }).distinct().toArray(String[]::new);
-                if (serviceNames.length == 0 && annotated instanceof TypeElement)
-                    serviceNames = new String[]{((TypeElement) annotated).asType().toString()};
+                }).collect(Collectors.toSet());
+                boolean addAnnotated = serviceNames.isEmpty() || annotated.getAnnotationMirrors().stream().map(AnnotationMirror::getAnnotationType).anyMatch(annotationType -> {
+                    return additionalAnnotations.stream().map(TypeElement::asType).anyMatch(annotationType::equals);
+                });
+                if (addAnnotated)
+                    serviceNames.add(((TypeElement) annotated).asType().toString());
                 for (String serviceName : serviceNames)
                     services.computeIfAbsent(serviceName, name -> new Services()).add(annotated);
             }
