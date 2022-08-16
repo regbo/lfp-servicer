@@ -2,7 +2,10 @@ package com.austinv11.servicer;
 
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
-import javax.lang.model.element.*;
+import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.PackageElement;
+import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.MirroredTypesException;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
@@ -11,6 +14,10 @@ import javax.tools.Diagnostic;
 import javax.tools.FileObject;
 import javax.tools.StandardLocation;
 import java.io.*;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -45,15 +52,40 @@ public class ServicerProcessor extends AbstractProcessor {
             "    }\n" +
             "}\n" +
             "";
-
+    private final Set<TypeElement> annotatedElements = new LinkedHashSet<>();
+    private final Map<String, Services> serviceMapping = new HashMap<>();
     private Types typeUtils;
     private Elements elements;
     private Filer filer;
     private Messager messager;
-    private final Map<String, Services> serviceMapping = new HashMap<>();
+
 
     public ServicerProcessor() {
     } // Required
+
+    private static Map.Entry<String, String> getServicerRegistrationClassNameEntry(TypeElement serviceTypeElement, TypeElement implementationTypeElement) {
+        String implementationTypePackageName = getPackageName(implementationTypeElement);
+        String simpleName = Stream.<Object>of(serviceTypeElement.getSimpleName(), implementationTypeElement.getSimpleName(), ServicerRegistration.class.getSimpleName()).map(Objects::toString).collect(Collectors.joining());
+        return new AbstractMap.SimpleEntry<>(implementationTypePackageName, simpleName);
+    }
+
+    private static String getPackageName(Element element) {
+        Element currentElement = element;
+        while (currentElement != null) {
+            if (currentElement.getKind() == ElementKind.PACKAGE && currentElement instanceof PackageElement)
+                return ((PackageElement) currentElement).getQualifiedName().toString();
+            currentElement = currentElement.getEnclosingElement();
+        }
+        return null;
+    }
+
+    private static int getJavaVersion() {
+        try {
+            return Integer.parseInt(System.getProperty("java.specification.version"));
+        } catch (NumberFormatException pE) {
+            return 8;
+        }
+    }
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
@@ -61,46 +93,45 @@ public class ServicerProcessor extends AbstractProcessor {
         typeUtils = processingEnv.getTypeUtils();
         elements = processingEnv.getElementUtils();
         filer = processingEnv.getFiler();
-        messager = processingEnv.getMessager();
+        messager = messager;
     }
 
     @Override
     public synchronized boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
-        if (roundEnv.errorRaised()) return false;
-        List<? extends TypeElement> additionalAnnotations = getAdditionalAnnotations(roundEnv).collect(Collectors.toList());
-        Stream<? extends Element> annotatedStream = roundEnv.getElementsAnnotatedWith(WireService.class).stream();
-        annotatedStream = Stream.concat(annotatedStream, additionalAnnotations.stream().flatMap(annotation -> roundEnv.getElementsAnnotatedWith(annotation).stream()));
-        annotatedStream = annotatedStream.distinct();
-        //Handle @WireService
-        Iterator<? extends Element> annotatedIter = annotatedStream.iterator();
-        while (annotatedIter.hasNext()) {
-            Element annotated = annotatedIter.next();
-            if (annotated.getKind() == ElementKind.CLASS) {
-                WireService[] serviceAnnotations = annotated.getAnnotationsByType(WireService.class);
-                Set<String> serviceNames = Stream.of(serviceAnnotations).flatMap(service -> {
-                    try {
-                        return Stream.of(service.value()).map(Class::getCanonicalName);
-                    } catch (MirroredTypesException e) {
-                        List<? extends TypeMirror> typeMirrors = e.getTypeMirrors();
-                        if (typeMirrors == null)
-                            return Stream.empty();
-                        return typeMirrors.stream().map(Object::toString);
-                    }
-                }).collect(Collectors.toSet());
-                List<TypeMirror> matchingAdditionalAnnotations = additionalAnnotations.stream().map(TypeElement::asType).filter(typeMirror -> {
-                    return annotated.getAnnotationMirrors().stream().map(AnnotationMirror::getAnnotationType).anyMatch(typeMirror::equals);
-                }).collect(Collectors.toList());
-                if (serviceNames.isEmpty() || !matchingAdditionalAnnotations.isEmpty())
-                    serviceNames.add(((TypeElement) annotated).asType().toString());
-                for (String serviceName : serviceNames)
-                    serviceMapping.computeIfAbsent(serviceName, nil -> new Services()).add(annotated);
+        if (roundEnv.processingOver())
+            processingOver();
+        else
+            for (TypeElement annotation : annotations) {
+                if (annotation.getAnnotation(WireService.class) != null) {
+                    if (isValidElement(annotation))
+                        for (Element annotatedElement : roundEnv.getElementsAnnotatedWith(annotation))
+                            if (annotatedElement instanceof TypeElement)
+                                annotatedElements.add((TypeElement) annotatedElement);
+                }
             }
-        }
+        return false;
+    }
 
+    private void processingOver() {
+        for (TypeElement annotated : annotatedElements) {
+            WireService[] serviceAnnotations = annotated.getAnnotationsByType(WireService.class);
+            Set<String> serviceNames = Stream.of(serviceAnnotations).flatMap(service -> {
+                try {
+                    return Stream.of(service.value()).map(Class::getCanonicalName);
+                } catch (MirroredTypesException e) {
+                    List<? extends TypeMirror> typeMirrors = e.getTypeMirrors();
+                    if (typeMirrors == null)
+                        return Stream.empty();
+                    return typeMirrors.stream().map(Object::toString);
+                }
+            }).collect(Collectors.toSet());
+            if (serviceNames.isEmpty())
+                serviceNames.add(annotated.asType().toString());
+            for (String serviceName : serviceNames)
+                serviceMapping.computeIfAbsent(serviceName, nil -> new Services()).add(annotated);
+        }
         messager.printMessage(Diagnostic.Kind.NOTE, "Found " + serviceMapping.size() + " services!\n");
 
-        if (!roundEnv.processingOver())  // Only process at end
-            return true;
         for (String serviceName : new ArrayList<>(serviceMapping.keySet())) {
             TypeElement serviceTypeElement = elements.getTypeElement(serviceName);
             for (TypeElement implementationTypeElement : serviceMapping.get(serviceName).getElements(elements)) {
@@ -108,14 +139,16 @@ public class ServicerProcessor extends AbstractProcessor {
                 serviceMapping.computeIfAbsent(ServicerRegistration.class.getName(), nil -> new Services()).add(classNameEntry.getKey() + "." + classNameEntry.getValue());
             }
         }
-        serviceMapping.entrySet().stream().sorted(Comparator.comparing(ent -> ServicerRegistration.class.getName().equals(ent.getKey()) ? 1 : 0)).forEach(ent -> {
+        serviceMapping.entrySet().stream().sorted(Comparator.comparing(ent -> {
+            return ServicerRegistration.class.getName().equals(ent.getKey()) ? 1 : 0;
+        })).forEach(ent -> {
             String serviceName = ent.getKey();
             Services services = ent.getValue();
 
 
-            String serviceLocation = "META-INF/services" + "/" + serviceName;
+            String serviceLocation = "META-INF/services/" + serviceName;
 
-            List<String> oldServices = new ArrayList<>();
+            Set<String> oldServices = new LinkedHashSet<>();
 
             try {
                 // If the file has already been created, we must first call getResource to allow for overwriting
@@ -136,11 +169,7 @@ public class ServicerProcessor extends AbstractProcessor {
             }
 
             try {
-                Element[] originatingElements;
-                if (ServicerRegistration.class.getName().equals(serviceName))
-                    originatingElements = new Element[0];
-                else
-                    originatingElements = services.getElements(elements);
+                Element[] originatingElements = services.getElements(elements);
                 FileObject fo = filer.createResource(StandardLocation.CLASS_OUTPUT, "", serviceLocation, originatingElements);
                 try (OutputStreamWriter w = new OutputStreamWriter(fo.openOutputStream())) {
                     for (String oldService : oldServices) {
@@ -161,7 +190,7 @@ public class ServicerProcessor extends AbstractProcessor {
                     TypeElement serviceTypeElement = elements.getTypeElement(serviceName);
                     for (TypeElement implementationTypeElement : services.getElements(elements))
                         try {
-                            writeServicerRegistration(filer, serviceTypeElement, implementationTypeElement);
+                            writeRegistration(filer, serviceTypeElement, implementationTypeElement);
                         } catch (Throwable e) {
                             String message = String.format("Error caught attempting to process service registration. serviceType:%s implementationType:%s", serviceTypeElement.asType(), implementationTypeElement.asType());
                             messager.printMessage(Diagnostic.Kind.NOTE, message + "\n");
@@ -170,35 +199,14 @@ public class ServicerProcessor extends AbstractProcessor {
                     messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process service registrations.\n");
                 }
         });
-        return true;
     }
-
 
     @Override
     public SourceVersion getSupportedSourceVersion() {
         return super.getSupportedSourceVersion();
     }
 
-
-    private Stream<? extends TypeElement> getAdditionalAnnotations(RoundEnvironment roundEnv) {
-        Set<TypeMirror> visitedTypeMirrors = new HashSet<>();
-        return roundEnv.getElementsAnnotatedWith(WireService.class).stream().flatMap(annotated -> {
-            return getAdditionalAnnotations(roundEnv, annotated, visitedTypeMirrors);
-        });
-    }
-
-    private Stream<? extends TypeElement> getAdditionalAnnotations(RoundEnvironment roundEnv, Element element, Set<TypeMirror> visitedTypeMirrors) {
-        if (element.getKind() != ElementKind.ANNOTATION_TYPE || !(element instanceof TypeElement))
-            return Stream.empty();
-        TypeElement typeElement = (TypeElement) element;
-        if (!visitedTypeMirrors.add(typeElement.asType()))
-            return Stream.empty();
-        Stream<? extends TypeElement> elStream = roundEnv.getElementsAnnotatedWith(typeElement).stream().flatMap(annotated -> getAdditionalAnnotations(roundEnv, annotated, visitedTypeMirrors));
-        elStream = Stream.concat(Stream.of(typeElement), elStream);
-        return elStream;
-    }
-
-    private void writeServicerRegistration(Filer filer, TypeElement serviceTypeElement, TypeElement implementationTypeElement) throws IOException {
+    private void writeRegistration(Filer filer, TypeElement serviceTypeElement, TypeElement implementationTypeElement) throws IOException {
         String code = CODE_TEMPLATE;
         Map.Entry<String, String> classNameEntry = getServicerRegistrationClassNameEntry(serviceTypeElement, implementationTypeElement);
         String implementationTypePackageName = classNameEntry.getKey();
@@ -227,29 +235,29 @@ public class ServicerProcessor extends AbstractProcessor {
         }
     }
 
-    private static Map.Entry<String, String> getServicerRegistrationClassNameEntry(TypeElement serviceTypeElement, TypeElement implementationTypeElement) {
-        String implementationTypePackageName = getPackageName(implementationTypeElement);
-        String simpleName = Stream.<Object>of(serviceTypeElement.getSimpleName(), implementationTypeElement.getSimpleName(), ServicerRegistration.class.getSimpleName()).map(Objects::toString).collect(Collectors.joining());
-        return new AbstractMap.SimpleEntry<>(implementationTypePackageName, simpleName);
-    }
-
-    private static String getPackageName(Element element) {
-        Element currentElement = element;
-        while (currentElement != null) {
-            if (currentElement.getKind() == ElementKind.PACKAGE && currentElement instanceof PackageElement)
-                return ((PackageElement) currentElement).getQualifiedName().toString();
-            currentElement = currentElement.getEnclosingElement();
+    private boolean isValidElement(Element element) {
+        Retention retention = element.getAnnotation(Retention.class);
+        if (retention == null || retention.value() != RetentionPolicy.RUNTIME) {
+            messager
+                    .printMessage(Diagnostic.Kind.MANDATORY_WARNING, "Retention should be RUNTIME", element);
+            return false;
         }
-        return null;
-    }
-
-
-    private static int getJavaVersion() {
-        try {
-            return Integer.parseInt(System.getProperty("java.specification.version"));
-        } catch (NumberFormatException pE) {
-            return 8;
+        Target target = element.getAnnotation(Target.class);
+        if (target == null || target.value().length == 0) {
+            messager
+                    .printMessage(Diagnostic.Kind.MANDATORY_WARNING, "Target has to be defined", element);
+            return false;
+        } else {
+            for (ElementType elementType : target.value()) {
+                if (elementType != ElementType.TYPE) {
+                    messager
+                            .printMessage(Diagnostic.Kind.MANDATORY_WARNING, "Unsupported type: " + elementType,
+                                    element);
+                    return false;
+                }
+            }
         }
+        return true;
     }
 
     private static class Services {
