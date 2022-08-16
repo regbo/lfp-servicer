@@ -35,12 +35,12 @@ public class ServicerProcessor extends AbstractProcessor {
             "public class {{{SIMPLE_NAME}}} implements ServicerRegistration<{{{SERVICE_TYPE_CLASS_NAME}}}> {\n" +
             "\n" +
             "    @Override\n" +
-            "    public Class<X> serviceType() {\n" +
+            "    public Class<{{{SERVICE_TYPE_CLASS_NAME}}}> serviceType() {\n" +
             "        return {{{SERVICE_TYPE_CLASS_NAME}}}.class;\n" +
             "    }\n" +
             "\t\n" +
             "    @Override\n" +
-            "    public Class<? extends X> implementationType() {\n" +
+            "    public Class<{{{IMPLEMENTATION_TYPE_CLASS_NAME}}}> implementationType() {\n" +
             "        return {{{IMPLEMENTATION_TYPE_CLASS_NAME}}}.class;\n" +
             "    }\n" +
             "}\n" +
