@@ -2,10 +2,7 @@ package com.austinv11.servicer;
 
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
-import javax.lang.model.element.AnnotationMirror;
-import javax.lang.model.element.Element;
-import javax.lang.model.element.ElementKind;
-import javax.lang.model.element.TypeElement;
+import javax.lang.model.element.*;
 import javax.lang.model.type.MirroredTypesException;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
@@ -13,17 +10,41 @@ import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
 import javax.tools.FileObject;
 import javax.tools.StandardLocation;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
 @SupportedAnnotationTypes({"com.austinv11.servicer.WireService"})
 public class ServicerProcessor extends AbstractProcessor {
+
+    private static final String CODE_TEMPLATE = "" +
+            "package {{{IMPLEMENTATION_TYPE_PACKAGE_NAME}}};\n" +
+            "\n" +
+            "import com.austinv11.servicer.ServicerRegistration;\n" +
+            "import {{{GENERATED_CLASS_NAME}}};\n" +
+            "\n" +
+            "@Generated(value = \"{{{ANNOTATION_PROCESSOR_CLASS_NAME}}}\", date = \"{{{DATE}}}\")\n" +
+            "public class {{{SIMPLE_NAME}}} implements ServicerRegistration<{{{SERVICE_TYPE_CLASS_NAME}}}> {\n" +
+            "\n" +
+            "    @Override\n" +
+            "    public Class<X> serviceType() {\n" +
+            "        return {{{SERVICE_TYPE_CLASS_NAME}}}.class;\n" +
+            "    }\n" +
+            "\t\n" +
+            "    @Override\n" +
+            "    public Class<? extends X> implementationType() {\n" +
+            "        return {{{IMPLEMENTATION_TYPE_CLASS_NAME}}}.class;\n" +
+            "    }\n" +
+            "}\n" +
+            "";
 
     private Types typeUtils;
     private Elements elements;
@@ -73,9 +94,6 @@ public class ServicerProcessor extends AbstractProcessor {
                     serviceNames.add(((TypeElement) annotated).asType().toString());
                 for (String serviceName : serviceNames)
                     services.computeIfAbsent(serviceName, nil -> new Services()).add(annotated);
-                services.computeIfAbsent(WireService.class.getName(), nil -> new Services()).add(annotated);
-                for (TypeMirror matchingAdditionalAnnotation : matchingAdditionalAnnotations)
-                    services.computeIfAbsent(matchingAdditionalAnnotation.toString(), nil -> new Services()).add(annotated);
             }
         }
 
@@ -121,6 +139,18 @@ public class ServicerProcessor extends AbstractProcessor {
             } catch (Throwable e) {
                 messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process services.\n");
             }
+            try {
+                TypeElement serviceTypeElement = elements.getTypeElement(k);
+                for (TypeElement implementationTypeElement : s.getElements(elements))
+                    try {
+                        writeServicerRegistration(filer, serviceTypeElement, implementationTypeElement);
+                    } catch (Throwable e) {
+                        String message = String.format("Error caught attempting to process service registration. serviceType:%s implementationType:%s", serviceTypeElement.asType(), implementationTypeElement.asType());
+                        messager.printMessage(Diagnostic.Kind.NOTE, message + "\n");
+                    }
+            } catch (Throwable e) {
+                messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process service registrations.\n");
+            }
         });
         return true;
     }
@@ -130,6 +160,7 @@ public class ServicerProcessor extends AbstractProcessor {
     public SourceVersion getSupportedSourceVersion() {
         return super.getSupportedSourceVersion();
     }
+
 
     private Stream<? extends TypeElement> getAdditionalAnnotations(RoundEnvironment roundEnv) {
         Set<TypeMirror> visitedTypeMirrors = new HashSet<>();
@@ -149,8 +180,55 @@ public class ServicerProcessor extends AbstractProcessor {
         return elStream;
     }
 
+    private void writeServicerRegistration(Filer filer, TypeElement serviceTypeElement, TypeElement implementationTypeElement) throws IOException {
+        String code = CODE_TEMPLATE;
+        String implementationTypePackageName = getPackageName(implementationTypeElement);
+        String simpleName = serviceTypeElement.getSimpleName().toString() + ServicerRegistration.class.getSimpleName();
+        {
+            Map<String, String> tokenMap = new HashMap<>();
+            tokenMap.put("IMPLEMENTATION_TYPE_PACKAGE_NAME", implementationTypePackageName);
+            tokenMap.put("GENERATED_CLASS_NAME", getJavaVersion() >= 9 ? "javax.annotation.processing.Generated"
+                    : "javax.annotation.Generated");
+            tokenMap.put("DATE", new SimpleDateFormat("yyyy-MM-dd'T'HH:mmZ").format(new Date()));
+            tokenMap.put("ANNOTATION_PROCESSOR_CLASS_NAME", this.getClass().getName());
+            tokenMap.put("SIMPLE_NAME", simpleName);
+            tokenMap.put("SERVICE_TYPE_CLASS_NAME", serviceTypeElement.asType().toString());
+            tokenMap.put("IMPLEMENTATION_TYPE_CLASS_NAME", implementationTypeElement.asType().toString());
+            for (Map.Entry<String, String> ent : tokenMap.entrySet()) {
+                String find = String.format("{{{%s}}}", ent.getKey());
+                String replace = ent.getValue();
+                code = code.replaceAll(Pattern.quote(find), replace);
+            }
+        }
+        FileObject sourceFile = filer.getResource(StandardLocation.SOURCE_OUTPUT, implementationTypePackageName, simpleName + ".java");
+        Path path = Paths.get(sourceFile.toUri());
+        try (Writer writer = Files.exists(path) ? Files.newBufferedWriter(path)
+                : filer.createSourceFile(implementationTypePackageName + "." + simpleName, implementationTypeElement).openWriter()) {
+            writer.write(code);
+        }
+    }
+
+    private String getPackageName(Element element) {
+        Element currentElement = element;
+        while (currentElement != null) {
+            if (currentElement.getKind() == ElementKind.PACKAGE && currentElement instanceof PackageElement)
+                return ((PackageElement) currentElement).getQualifiedName().toString();
+            currentElement = currentElement.getEnclosingElement();
+        }
+        return null;
+    }
+
+    private static int getJavaVersion() {
+        try {
+            return Integer.parseInt(System.getProperty("java.specification.version"));
+        } catch (NumberFormatException pE) {
+            return 8;
+        }
+    }
+
     private static class Services {
         private final Set<String> impls = new HashSet<>();
+
 
         void add(Element annotated) {
             impls.add(annotated.asType().toString());
@@ -160,8 +238,8 @@ public class ServicerProcessor extends AbstractProcessor {
             return impls;
         }
 
-        Element[] getElements(Elements elements) {
-            return impls.stream().map(elements::getTypeElement).toArray(Element[]::new);
+        TypeElement[] getElements(Elements elements) {
+            return impls.stream().map(elements::getTypeElement).toArray(TypeElement[]::new);
         }
     }
 }
