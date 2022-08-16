@@ -112,20 +112,6 @@ public class ServicerProcessor extends AbstractProcessor {
             String serviceName = ent.getKey();
             Services services = ent.getValue();
 
-            if (!ServicerRegistration.class.getName().equals(serviceName))
-                try {
-                    TypeElement serviceTypeElement = elements.getTypeElement(serviceName);
-                    for (TypeElement implementationTypeElement : services.getElements(elements))
-                        try {
-                            writeServicerRegistration(filer, serviceTypeElement, implementationTypeElement);
-                        } catch (Throwable e) {
-                            String message = String.format("Error caught attempting to process service registration. serviceType:%s implementationType:%s", serviceTypeElement.asType(), implementationTypeElement.asType());
-                            messager.printMessage(Diagnostic.Kind.NOTE, message + "\n");
-                        }
-                } catch (Throwable e) {
-                    messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process service registrations.\n");
-                }
-
 
             String serviceLocation = "META-INF/services" + "/" + serviceName;
 
@@ -150,7 +136,12 @@ public class ServicerProcessor extends AbstractProcessor {
             }
 
             try {
-                FileObject fo = filer.createResource(StandardLocation.CLASS_OUTPUT, "", serviceLocation, services.getElements(elements));
+                Element[] originatingElements;
+                if (ServicerRegistration.class.getName().equals(serviceName))
+                    originatingElements = new Element[0];
+                else
+                    originatingElements = services.getElements(elements);
+                FileObject fo = filer.createResource(StandardLocation.CLASS_OUTPUT, "", serviceLocation, originatingElements);
                 try (OutputStreamWriter w = new OutputStreamWriter(fo.openOutputStream())) {
                     for (String oldService : oldServices) {
                         w.append(oldService).append("\n");
@@ -164,6 +155,20 @@ public class ServicerProcessor extends AbstractProcessor {
                 messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process services.\n");
             }
 
+
+            if (!ServicerRegistration.class.getName().equals(serviceName))
+                try {
+                    TypeElement serviceTypeElement = elements.getTypeElement(serviceName);
+                    for (TypeElement implementationTypeElement : services.getElements(elements))
+                        try {
+                            writeServicerRegistration(filer, serviceTypeElement, implementationTypeElement);
+                        } catch (Throwable e) {
+                            String message = String.format("Error caught attempting to process service registration. serviceType:%s implementationType:%s", serviceTypeElement.asType(), implementationTypeElement.asType());
+                            messager.printMessage(Diagnostic.Kind.NOTE, message + "\n");
+                        }
+                } catch (Throwable e) {
+                    messager.printMessage(Diagnostic.Kind.NOTE, "Error caught attempting to process service registrations.\n");
+                }
         });
         return true;
     }
